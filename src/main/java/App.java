@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 public class App {
     public static void main(String[] args) throws PcapNativeException{
 
+
         // 1) OS에 맞게 기본 NIC 자동 감지
         String defaultIf = detectDefaultInterface();
         System.out.println("자동 선택 된 NIC = " + defaultIf);
@@ -55,28 +56,44 @@ public class App {
         return null; // 실패 시 null 반환
     }
 
-    private static String getDefaultInterfaceWin(){
+    private static String getDefaultInterfaceWin() {
         try {
-            Process proc = Runtime.getRuntime().exec("route print");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+            // 1) 모든 네트워크 인터페이스 + 기본 게이트웨이 정보 가져오기
+            Process proc = Runtime.getRuntime().exec(new String[] {
+                    "powershell.exe", "-NoLogo", "-Command",
+                    "chcp 65001 > $null; " +
+                            "(Get-NetIPConfiguration | " +
+                            "Where-Object {$_.IPv4DefaultGateway -ne $null} | " +
+                            "Select-Object -ExpandProperty InterfaceDescription)"
+            });
 
-            String line;
+            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), "UTF-8"));
+            String adapterDesc = reader.readLine();
 
-            while ((line = reader.readLine()) != null){
-                // 기본 게이트웨이 라인을 찾는 조건
-                // 예: 0.0.0.0          0.0.0.0      192.168.0.1    192.168.0.10     25    Ethernet
-                if(line.trim().startsWith("0.0.0.0")){
-                    String[] parts = line.trim().split("\\s+");
-                    // 마지막 열이 InterfaceAlias (Ethernet, Wi-Fi 등)
-                    String ifaceName = parts[parts.length -1];
-                    return ifaceName;
+            if (adapterDesc == null || adapterDesc.trim().isEmpty()) {
+                System.err.println("기본 게이트웨이를 가진 NIC을 찾지 못했습니다.");
+                return null;
+            }
+
+            adapterDesc = adapterDesc.trim();
+            System.out.println("Windows Adapter Description = " + adapterDesc);
+
+            // 2) pcap4j 목록에서 description 매칭
+            for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
+                if (dev.getDescription() != null && dev.getDescription().contains(adapterDesc)) {
+                    return dev.getName();  // pcap4j NIC name 반환
                 }
             }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+
         return null;
     }
+
+
+
 
     private static String getDefaultInterfaceLinux(){
         try{
