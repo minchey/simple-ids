@@ -1,9 +1,11 @@
 import org.pcap4j.core.*;
+import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.concurrent.TimeoutException;
 
 
 public class App {
@@ -28,14 +30,40 @@ public class App {
                     10
             );
 
-            Packet packet = handle.getNextPacketEx();
-            System.out.println(packet);
+            System.out.println("[+] 실시간 패킷 캡처 시작…");
 
-            handle.close();
+            while (true) {
+                try {
+
+                    // 1) 네트워크에서 캡처한 '그대로의 패킷'
+                    Packet raw = handle.getNextPacketEx();
+
+                    // 2) raw 패킷에서 Ethernet(겉 껍데기) 추출
+                    EthernetPacket ether = raw.get(EthernetPacket.class);
+                    if (ether == null) {
+                        // 이더넷 패킷이 아니면 스킵
+                        continue;
+                    }
+
+                    // 3) Ethernet 안에 들어 있는 '실제 내용물'
+                    Packet inner = ether.getPayload();
+
+                    if (inner == null) {
+                        continue;
+                    }
+
+                    // 4) 패킷 종류 출력
+                    System.out.println("프로토콜 → " + inner.getClass().getSimpleName());
+
+                } catch (TimeoutException e) {
+                    // 패킷 잠깐 안 들어오면 다시 반복
+                }
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
         }
+
 
 
     }
