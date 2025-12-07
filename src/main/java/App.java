@@ -20,6 +20,24 @@ public class App {
             System.err.println("NIC를 찾지 못했습니다: " + defaultIf);
             return;
         }
+
+        try {
+            PcapHandle handle = nif.openLive(
+                    65536,
+                    PcapNetworkInterface.PromiscuousMode.PROMISCUOUS,
+                    10
+            );
+
+            Packet packet = handle.getNextPacketEx();
+            System.out.println(packet);
+
+            handle.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+
     }
 
     private static String detectDefaultInterface(){
