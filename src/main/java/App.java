@@ -2,6 +2,7 @@ import org.pcap4j.core.*;
 import org.pcap4j.packet.Packet;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 
 
@@ -51,5 +52,51 @@ public class App {
             e.printStackTrace();
         }
         return null; // 실패 시 null 반환
+    }
+
+    private static String getDefaultInterfaceWin(){
+        try {
+            Process proc = Runtime.getRuntime().exec("route print");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+
+            String line;
+
+            while ((line = reader.readLine()) != null){
+                // 기본 게이트웨이 라인을 찾는 조건
+                // 예: 0.0.0.0          0.0.0.0      192.168.0.1    192.168.0.10     25    Ethernet
+                if(line.trim().startsWith("0.0.0.0")){
+                    String[] parts = line.trim().split("\\s+");
+                    // 마지막 열이 InterfaceAlias (Ethernet, Wi-Fi 등)
+                    String ifaceName = parts[parts.length -1];
+                    return ifaceName;
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private static String getDefaultInterfaceLinux(){
+        try{
+            Process proc = Runtime.getRuntime().exec("ip route show");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+
+            String line;
+            while ((line = reader.readLine())!= null){
+                if(line.startsWith("default")){
+                    // 예: default via 192.168.0.1 dev wlan0
+                    String[] parts = line.split("\\s+");
+                    for(int i = 0; i < parts.length; i++){
+                        if(parts[i].equals("dev")){
+                            return parts[i +1];
+                        }
+                    }
+                }
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return null;
     }
 }
