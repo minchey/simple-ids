@@ -8,15 +8,16 @@ import java.io.InputStreamReader;
 
 public class App {
     public static void main(String[] args) throws PcapNativeException{
-        // 1) 모든 네트워크 인터페이스 목록 가져오기
-        var interfaces = Pcaps.findAllDevs();
 
+        // 1) OS에 맞게 기본 NIC 자동 감지
         String defaultIf = detectDefaultInterface();
         System.out.println("자동 선택 된 NIC = " + defaultIf);
 
-        // 2) 네트워크 인터페이스 출력
-        for(var nif : interfaces){
-            System.out.println("- " + nif.getName() + " : " + nif.getDescription());
+        // 2) pcap4j로 NIC 객체 가져오기
+        PcapNetworkInterface nif = Pcaps.getDevByName(defaultIf);
+        if(nif == null){
+            System.err.println("NIC를 찾지 못했습니다: " + defaultIf);
+            return;
         }
     }
 
