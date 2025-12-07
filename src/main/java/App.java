@@ -1,4 +1,5 @@
 import org.pcap4j.core.*;
+import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
 
@@ -50,6 +51,19 @@ public class App {
 
                     if (inner == null) {
                         continue;
+                    }
+
+                    // ★ ARP 패킷인지 확인
+                    if (inner instanceof ArpPacket) {
+                        ArpPacket arp = inner.get(ArpPacket.class);
+                        ArpPacket.ArpHeader ah = arp.getHeader();
+
+                        System.out.println("========== ARP 탐지 ==========");
+                        System.out.println("종류(Operation) → " + ah.getOperation()); // REQUEST / REPLY
+                        System.out.println("보낸 MAC(Source MAC) → " + ah.getSrcHardwareAddr());
+                        System.out.println("보낸 IP(Source IP) → " + ah.getSrcProtocolAddr());
+                        System.out.println("대상 IP(Target IP) → " + ah.getDstProtocolAddr());
+                        System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
                     }
 
                     // 4) 패킷 종류 출력
