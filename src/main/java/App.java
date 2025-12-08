@@ -1,31 +1,29 @@
 import network.NetworkDetector;
 import network.NetworkInfo;
+import network.NetworkCalc;
 
 import org.pcap4j.core.*;
 import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.concurrent.TimeoutException;
 
 public class App {
 
     public static void main(String[] args) throws PcapNativeException {
 
-        // 1) 운영체제별 NIC/IP/Mask/Gateway 자동 탐지
+        //기본 네트워크 정보 가져오기
+        //운영체제별 NIC/IP/Mask/Gateway 자동 탐지
         NetworkInfo info = NetworkDetector.detect();
-
-
         if (info == null) {
             System.err.println("네트워크 정보를 가져오지 못했습니다.");
             return;
         }
 
         System.out.println("===== 자동 네트워크 정보 =====");
-        System.out.println("인터페이스 이름 = " + info.interfaceName);
-        System.out.println("IP 주소 = " + info.ip);
+        System.out.println("인터페이스 = " + info.interfaceName);
+        System.out.println("IP = " + info.ip);
         System.out.println("게이트웨이 = " + info.gateway);
         System.out.println("서브넷 마스크 = " + info.subnetMask);
         System.out.println("==============================");
@@ -82,13 +80,24 @@ public class App {
                     ArpPacket arp = inner.get(ArpPacket.class);
                     ArpPacket.ArpHeader ah = arp.getHeader();
 
-                    System.out.println("========== ARP 탐지 ==========");
+                    String srcIp = ah.getSrcProtocolAddr().getHostAddress();
+                    String dstIp = ah.getDstProtocolAddr().getHostAddress();
+
+                    boolean srcInLan = NetworkCalc.isSameNetwork(info.ip, srcIp, info.subnetMask);
+                    boolean dstInLan = NetworkCalc.isSameNetwork(info.ip, dstIp, info.subnetMask);
+
+                    // LAN 범위 밖이라면 그냥 스킵
+                    if (!srcInLan && !dstInLan) {
+                        continue;
+                    }
+
+                    // LAN 내부 ARP 패킷
+                    System.out.println("========== ARP 탐지 (LAN 내) ==========");
                     System.out.println("종류(Operation) → " + ah.getOperation());
                     System.out.println("보낸 MAC(Source MAC) → " + ah.getSrcHardwareAddr());
-                    System.out.println("보낸 IP(Source IP) → " + ah.getSrcProtocolAddr());
-                    System.out.println("대상 IP(Target IP) → " + ah.getDstProtocolAddr());
+                    System.out.println("보낸 IP(Source IP) → " + srcIp);
+                    System.out.println("대상 IP(Target IP) → " + dstIp);
                     System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
-                    System.out.println("프로토콜 → ArpPacket");
                 }
 
             } catch (TimeoutException e) {
