@@ -72,13 +72,10 @@ public class NetworkDetector {
         NetworkInfo info = new NetworkInfo();
 
         try {
-
+            // 1) 전체 NIC 정보 가져오기
             Process proc = Runtime.getRuntime().exec(new String[]{
                     "powershell.exe", "-NoLogo", "-Command",
-                    "chcp 65001 > $null; " +
-                            "(Get-NetIPConfiguration | " +
-                            " Where-Object {$_.IPv4DefaultGateway -ne $null}) | " +
-                            "Select-Object InterfaceDescription, IPv4Address, IPv4DefaultGateway, IPv4SubnetMask"
+                    "Get-NetIPConfiguration"
             });
 
             BufferedReader reader = new BufferedReader(
@@ -86,32 +83,93 @@ public class NetworkDetector {
             );
 
             String line;
-            while ((line = reader.readLine()) != null) {
+            boolean inBlock = false;
 
+            String ip = null;
+            String gateway = null;
+            String description = null;
+
+            while ((line = reader.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
 
+                // NIC 블록의 시작: 항상 InterfaceAlias로 시작함
+                if (line.startsWith("InterfaceAlias")) {
+                    // 새 블록이 시작되므로 초기화
+                    ip = null;
+                    gateway = null;
+                    description = null;
+                    inBlock = true;
+                    continue;
+                }
+
+                if (!inBlock) continue;
+
+                // Description (pcap4j가 사용하는 NIC 매칭용)
                 if (line.startsWith("InterfaceDescription")) {
-                    info.interfaceName = line.replace("InterfaceDescription : ", "").trim();
+                    description = line.split(":", 2)[1].trim();
                 }
-                else if (line.startsWith("IPv4Address")) {
-                    info.ip = line.replace("IPv4Address : ", "").trim();
+
+                // IP 주소
+                if (line.startsWith("IPv4Address")) {
+                    ip = line.split(":", 2)[1].trim();
                 }
-                else if (line.startsWith("IPv4SubnetMask")) {
-                    info.subnetMask = line.replace("IPv4SubnetMask : ", "").trim();
-                }
-                else if (line.startsWith("IPv4DefaultGateway")) {
-                    info.gateway = line.replace("IPv4DefaultGateway : ", "").trim();
+
+                // 기본 게이트웨이
+                if (line.startsWith("IPv4DefaultGateway")) {
+                    gateway = line.split(":", 2)[1].trim();
+
+                    // 💡 여기서 바로 판단 가능: gateway가 있으면 "인터넷 되는 NIC"
+                    if (!gateway.isEmpty()) {
+                        info.ip = ip;
+                        info.gateway = gateway;
+                        info.interfaceName = description;
+                        break; // 이 NIC가 우리가 찾던 기본 NIC → 나머지 무시
+                    }
                 }
             }
+
+            if (info.ip == null || info.gateway == null || info.interfaceName == null) {
+                System.err.println("기본 NIC 블록에서 정보를 완전히 얻지 못했습니다.");
+                return null;
+            }
+
+            // 2) PrefixLength → CIDR → SubnetMask 변환
+            Process prefixProc = Runtime.getRuntime().exec(new String[]{
+                    "powershell.exe", "-NoLogo", "-Command",
+                    "Get-NetIPAddress -AddressFamily IPv4"
+            });
+
+            BufferedReader pr = new BufferedReader(
+                    new InputStreamReader(prefixProc.getInputStream(), "UTF-8")
+            );
+
+            while ((line = pr.readLine()) != null) {
+                line = line.trim();
+
+                if (line.startsWith("IPAddress") && line.contains(info.ip)) {
+
+                    String prefixLine;
+                    while ((prefixLine = pr.readLine()) != null) {
+                        prefixLine = prefixLine.trim();
+                        if (prefixLine.startsWith("PrefixLength")) {
+                            int cidr = Integer.parseInt(prefixLine.split(":", 2)[1].trim());
+                            info.subnetMask = cidrToMask(cidr);
+                            return info;
+                        }
+                    }
+                }
+            }
+
+            System.err.println("PrefixLength(CIDR)를 찾지 못했습니다.");
+            return null;
 
         } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
-
-        return info;
     }
+
 
     private static NetworkInfo detectLinux() {
 

@@ -1,180 +1,102 @@
+import network.NetworkDetector;
+import network.NetworkInfo;
+
 import org.pcap4j.core.*;
 import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.concurrent.TimeoutException;
 
-
 public class App {
-    public static void main(String[] args) throws PcapNativeException{
+
+    public static void main(String[] args) throws PcapNativeException {
+
+        // 1) 운영체제별 NIC/IP/Mask/Gateway 자동 탐지
+        NetworkInfo info = NetworkDetector.detect();
 
 
-        // 1) OS에 맞게 기본 NIC 자동 감지
-        String defaultIf = detectDefaultInterface();
-        System.out.println("자동 선택 된 NIC = " + defaultIf);
-
-        // 2) pcap4j로 NIC 객체 가져오기
-        PcapNetworkInterface nif = Pcaps.getDevByName(defaultIf);
-        if(nif == null){
-            System.err.println("NIC를 찾지 못했습니다: " + defaultIf);
+        if (info == null) {
+            System.err.println("네트워크 정보를 가져오지 못했습니다.");
             return;
         }
 
-        try {
-            PcapHandle handle = nif.openLive(
-                    65536,
-                    PcapNetworkInterface.PromiscuousMode.PROMISCUOUS,
-                    10
-            );
+        System.out.println("===== 자동 네트워크 정보 =====");
+        System.out.println("인터페이스 이름 = " + info.interfaceName);
+        System.out.println("IP 주소 = " + info.ip);
+        System.out.println("게이트웨이 = " + info.gateway);
+        System.out.println("서브넷 마스크 = " + info.subnetMask);
+        System.out.println("==============================");
 
-            System.out.println("[+] 실시간 패킷 캡처 시작…");
+        // 2) pcap4j NIC 객체 가져오기
+        String winDesc = info.interfaceName;   // 예: "Realtek PCIe GbE Family Controller"
 
-            while (true) {
-                try {
+        PcapNetworkInterface nif = null;
 
-                    // 1) 네트워크에서 캡처한 '그대로의 패킷'
-                    Packet raw = handle.getNextPacketEx();
+        // 2) 모든 NIC 목록 확인
+        for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
+            if (dev.getDescription() != null && dev.getDescription().contains(winDesc)) {
+                nif = dev;
+                break;
+            }
+        }
 
-                    // 2) raw 패킷에서 Ethernet(겉 껍데기) 추출
-                    EthernetPacket ether = raw.get(EthernetPacket.class);
-                    if (ether == null) {
-                        // 이더넷 패킷이 아니면 스킵
-                        continue;
-                    }
+        if (nif == null) {
+            System.err.println("Pcap4j에서 NIC을 찾지 못했습니다: " + winDesc);
+            return;
+        }
 
-                    // 3) Ethernet 안에 들어 있는 '실제 내용물'
-                    Packet inner = ether.getPayload();
+        System.out.println("[PCAP4J 선택된 NIC]");
+        System.out.println("Name = " + nif.getName());
+        System.out.println("Description = " + nif.getDescription());
 
-                    if (inner == null) {
-                        continue;
-                    }
+        if (nif == null) {
+            System.err.println("Pcap4j에서 NIC을 찾지 못했습니다: " + info.interfaceName);
+            return;
+        }
 
-                    // ★ ARP 패킷인지 확인
-                    if (inner instanceof ArpPacket) {
-                        ArpPacket arp = inner.get(ArpPacket.class);
-                        ArpPacket.ArpHeader ah = arp.getHeader();
+        // 3) 패킷 캡처 핸들 열기
+        PcapHandle handle = nif.openLive(
+                65536,
+                PcapNetworkInterface.PromiscuousMode.PROMISCUOUS,
+                10
+        );
 
-                        System.out.println("========== ARP 탐지 ==========");
-                        System.out.println("종류(Operation) → " + ah.getOperation()); // REQUEST / REPLY
-                        System.out.println("보낸 MAC(Source MAC) → " + ah.getSrcHardwareAddr());
-                        System.out.println("보낸 IP(Source IP) → " + ah.getSrcProtocolAddr());
-                        System.out.println("대상 IP(Target IP) → " + ah.getDstProtocolAddr());
-                        System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
-                    }
+        System.out.println("[+] 실시간 ARP 기반 IDS 패킷 캡처 시작…");
 
-                    // 4) 패킷 종류 출력
-                    System.out.println("프로토콜 → " + inner.getClass().getSimpleName());
+        // 4) 메인 캡처 루프
+        while (true) {
+            try {
+                Packet raw = handle.getNextPacketEx();
 
-                } catch (TimeoutException e) {
-                    // 패킷 잠깐 안 들어오면 다시 반복
+                EthernetPacket ether = raw.get(EthernetPacket.class);
+                if (ether == null) continue;
+
+                Packet inner = ether.getPayload();
+                if (inner == null) continue;
+
+                // ★ ARP 탐지
+                if (inner instanceof ArpPacket) {
+                    ArpPacket arp = inner.get(ArpPacket.class);
+                    ArpPacket.ArpHeader ah = arp.getHeader();
+
+                    System.out.println("========== ARP 탐지 ==========");
+                    System.out.println("종류(Operation) → " + ah.getOperation());
+                    System.out.println("보낸 MAC(Source MAC) → " + ah.getSrcHardwareAddr());
+                    System.out.println("보낸 IP(Source IP) → " + ah.getSrcProtocolAddr());
+                    System.out.println("대상 IP(Target IP) → " + ah.getDstProtocolAddr());
+                    System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
+                    System.out.println("프로토콜 → ArpPacket");
                 }
+
+            } catch (TimeoutException e) {
+                // 패킷이 일정 시간 동안 없을 때 발생하는 예외 → 무시 가능
             }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-
-
-    }
-
-    private static String detectDefaultInterface(){
-        String os = System.getProperty("os.name").toLowerCase();
-
-        if(os.contains("mac")){
-            return getDefaultInterfaceMac();
-        } else if (os.contains("win")) {
-            return getDefaultInterfaceWin();
-        } else if (os.contains("linux")) {
-            return getDefaultInterfaceLinux();
-        }
-        return null; //감지실패
-    }
-
-    private static String getDefaultInterfaceMac(){
-        try {
-            //mac os 기본 라우팅 정보를 조회하는 명령어 실행
-            Process proc = Runtime.getRuntime().exec("route -n get default");
-
-            // 명령어의 출력 결과를 한 줄씩 읽기 위한 Reader 구성
-            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-
-            String line;
-            while ((line = reader.readLine()) != null){
-                // interface: en0 같은 줄 찾기
-                if(line.trim().startsWith("interface:")){
-                    return line.split(":")[1].trim();
-                }
+            catch (Exception e){
+                e.printStackTrace();
             }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
-        return null; // 실패 시 null 반환
-    }
-
-    private static String getDefaultInterfaceWin() {
-        try {
-            // 1) 모든 네트워크 인터페이스 + 기본 게이트웨이 정보 가져오기
-            Process proc = Runtime.getRuntime().exec(new String[] {
-                    "powershell.exe", "-NoLogo", "-Command",
-                    "chcp 65001 > $null; " +
-                            "(Get-NetIPConfiguration | " +
-                            "Where-Object {$_.IPv4DefaultGateway -ne $null} | " +
-                            "Select-Object -ExpandProperty InterfaceDescription)"
-            });
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), "UTF-8"));
-            String adapterDesc = reader.readLine();
-
-            if (adapterDesc == null || adapterDesc.trim().isEmpty()) {
-                System.err.println("기본 게이트웨이를 가진 NIC을 찾지 못했습니다.");
-                return null;
-            }
-
-            adapterDesc = adapterDesc.trim();
-            System.out.println("Windows Adapter Description = " + adapterDesc);
-
-            // 2) pcap4j 목록에서 description 매칭
-            for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
-                if (dev.getDescription() != null && dev.getDescription().contains(adapterDesc)) {
-                    return dev.getName();  // pcap4j NIC name 반환
-                }
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        return null;
-    }
-
-
-
-
-    private static String getDefaultInterfaceLinux(){
-        try{
-            Process proc = Runtime.getRuntime().exec("ip route show");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-
-            String line;
-            while ((line = reader.readLine())!= null){
-                if(line.startsWith("default")){
-                    // 예: default via 192.168.0.1 dev wlan0
-                    String[] parts = line.split("\\s+");
-                    for(int i = 0; i < parts.length; i++){
-                        if(parts[i].equals("dev")){
-                            return parts[i +1];
-                        }
-                    }
-                }
-            }
-        }catch (Exception e){
-            e.printStackTrace();
-        }
-        return null;
     }
 }
