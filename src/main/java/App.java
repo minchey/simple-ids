@@ -106,6 +106,32 @@ public class App {
                     String senderIp = srcIp;
                     String senderMac = ah.getSrcHardwareAddr().toString();
 
+                    // 1) IP → MAC 기록
+                    if (!ipToMac.containsKey(senderIp)) {
+                        ipToMac.put(senderIp, senderMac);
+                    } else {
+                        String oldMac = ipToMac.get(senderIp);
+                        if (!oldMac.equals(senderMac)) {
+                            System.out.println("🚨 [경고] 동일 IP에서 MAC 변경 감지!");
+                            System.out.println("IP: " + senderIp);
+                            System.out.println("기존 MAC: " + oldMac);
+                            System.out.println("새 MAC: " + senderMac);
+                        }
+                    }
+
+                    // 2) MAC → IP 기록
+                    if (!macToIp.containsKey(senderMac)) {
+                        macToIp.put(senderMac, senderIp);
+                    } else {
+                        String oldIp = macToIp.get(senderMac);
+                        if (!oldIp.equals(senderIp)) {
+                            System.out.println("⚠️ [주의] 동일 MAC에서 IP 변경 감지");
+                            System.out.println("MAC: " + senderMac);
+                            System.out.println("기존 IP: " + oldIp);
+                            System.out.println("새 IP: " + senderIp);
+                        }
+                    }
+
                     // LAN 내부 ARP 패킷
                     System.out.println("========== ARP 탐지 (LAN 내) ==========");
                     System.out.println("종류(Operation) → " + ah.getOperation());
