@@ -17,4 +17,6 @@ public class NetworkInfo {
     // 내가 사용하는 인터페이스 이름 (예: en0, eth0, \Device\NPF_XXXX)
     public String interfaceName;
 
+    // 실제 공유기의 MAC을 저장
+    public String gatewayMac;
 }

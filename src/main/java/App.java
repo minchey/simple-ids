@@ -135,6 +135,28 @@ public class App {
                         }
                     }
 
+                    // 3) 게이트웨이 스푸핑 탐지
+                    if (dstIp.equals(info.gateway) || srcIp.equals(info.gateway)) {
+
+                        String realGwMac = info.gatewayMac;
+                        String currentMac = senderMac;
+
+                        // 아직 게이트웨이 MAC을 기록하지 않았다면 → 최초 기록
+                        if (realGwMac == null) {
+                            info.gatewayMac = currentMac;
+                            System.out.println("📌 게이트웨이 MAC 기록됨: " + currentMac);
+                        }
+                        else {
+                            // 기록된 MAC과 다르면 → 스푸핑 공격 가능성
+                            if (!realGwMac.equals(currentMac)) {
+                                System.out.println("🚨🚨 [심각] 게이트웨이 ARP 스푸핑 감지!");
+                                System.out.println("게이트웨이 IP: " + info.gateway);
+                                System.out.println("정상 MAC: " + realGwMac);
+                                System.out.println("공격 MAC: " + currentMac);
+                            }
+                        }
+                    }
+
                     // LAN 내부 ARP 패킷
                     System.out.println("========== ARP 탐지 (LAN 내) ==========");
                     System.out.println("종류(Operation) → " + ah.getOperation());
