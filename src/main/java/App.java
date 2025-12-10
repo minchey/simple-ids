@@ -7,9 +7,18 @@ import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 public class App {
+
+    // ARP 기록 저장하는 테이블 (IDS의 기억력)
+    private static Map<String, String> ipToMac = new HashMap<>();
+    private static Map<String, String> macToIp = new HashMap<>();
+
+    // 게이트웨이 MAC(처음 이후 계속 비교)
+    private static String gatewayMac = null;
 
     public static void main(String[] args) throws PcapNativeException {
 
@@ -94,7 +103,8 @@ public class App {
                     // LAN 내부 ARP 패킷
                     System.out.println("========== ARP 탐지 (LAN 내) ==========");
                     System.out.println("종류(Operation) → " + ah.getOperation());
-                    System.out.println("보낸 MAC(Source MAC) → " + ah.getSrcHardwareAddr());
+                    System.out.println("보낸 MAC(Source MAC) → "
+                            + ah.getSrcHardwareAddr());
                     System.out.println("보낸 IP(Source IP) → " + srcIp);
                     System.out.println("대상 IP(Target IP) → " + dstIp);
                     System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
