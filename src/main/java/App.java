@@ -14,7 +14,7 @@ import java.util.concurrent.TimeoutException;
 public class App {
 
     // ARP 기록 저장하는 테이블 (IDS의 기억력)
-    private static Map<String, String> ipToMac = new HashMap<>();
+    private static Map<String, String> ipToMac = new HashMap<>(); //final은 참조변경이 되지 않아 초기화시 필요하므로 final x
     private static Map<String, String> macToIp = new HashMap<>();
 
     // 게이트웨이 MAC(처음 이후 계속 비교)
@@ -92,6 +92,8 @@ public class App {
                     String srcIp = ah.getSrcProtocolAddr().getHostAddress();
                     String dstIp = ah.getDstProtocolAddr().getHostAddress();
 
+
+
                     boolean srcInLan = NetworkCalc.isSameNetwork(info.ip, srcIp, info.subnetMask);
                     boolean dstInLan = NetworkCalc.isSameNetwork(info.ip, dstIp, info.subnetMask);
 
@@ -100,12 +102,16 @@ public class App {
                         continue;
                     }
 
+                    // ★ IDS에서 분석할 핵심 값 2개
+                    String senderIp = srcIp;
+                    String senderMac = ah.getSrcHardwareAddr().toString();
+
                     // LAN 내부 ARP 패킷
                     System.out.println("========== ARP 탐지 (LAN 내) ==========");
                     System.out.println("종류(Operation) → " + ah.getOperation());
                     System.out.println("보낸 MAC(Source MAC) → "
-                            + ah.getSrcHardwareAddr());
-                    System.out.println("보낸 IP(Source IP) → " + srcIp);
+                            + senderMac);
+                    System.out.println("보낸 IP(Source IP) → " + senderIp);
                     System.out.println("대상 IP(Target IP) → " + dstIp);
                     System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
                 }
