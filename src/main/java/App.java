@@ -116,6 +116,8 @@ public class App {
                             System.out.println("IP: " + senderIp);
                             System.out.println("기존 MAC: " + oldMac);
                             System.out.println("새 MAC: " + senderMac);
+                            ipToMac.put(senderIp, senderMac);
+
                         }
                     }
 
@@ -129,6 +131,7 @@ public class App {
                             System.out.println("MAC: " + senderMac);
                             System.out.println("기존 IP: " + oldIp);
                             System.out.println("새 IP: " + senderIp);
+                            macToIp.put(senderMac, senderIp);
                         }
                     }
 
