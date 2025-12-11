@@ -1,122 +1,215 @@
-# 운영체제별 네트워크 인터페이스 자동 감지 방식
 
-본 프로젝트에서는 IDS(침입 탐지 시스템)의 패킷 캡처 기능을 수행하기 위해  
-현재 시스템이 인터넷 통신에 사용 중인 **기본 네트워크 인터페이스(NIC)** 를 자동으로 감지하는 기능을 구현하였습니다.  
-운영체제별 NIC 구조가 서로 다르기 때문에 macOS와 Windows 환경에서 각각 적절한 방식을 사용하였습니다.
+# 🛡️ Simple IDS (ARP 기반 침입 탐지 시스템)
+
+본 프로젝트는 **로컬 네트워크(LAN)에서 발생하는 ARP 패킷을 실시간으로 감시하고,  
+ARP 스푸핑(ARP Spoofing) 공격을 탐지하는 IDS**입니다.
+
+운영체제별로 실제 네트워크 인터페이스 정보를 자동으로 감지하고,  
+패킷 캡처 라이브러리인 **pcap4j**를 사용해 ARP 트래픽을 분석합니다.
 
 ---
 
-## 1. macOS에서의 인터페이스 감지 방식
+# 📌 주요 기능
 
-macOS에서는 다음 명령어를 통해 기본 라우팅 경로(default route)를 확인할 수 있습니다.
+### ✅ 1. 운영체제(OS)별 NIC 자동 감지
 
-```bash
+운영체제마다 네트워크 인터페이스 구조가 달라 이를 자동으로 감지해야 합니다.
+
+| OS | 사용 방식 |
+|----|-----------|
+| **macOS** | `route -n get default` 명령어로 NIC/IP/MASK/GW 탐지 |
+| **Windows** | `Get-NetIPConfiguration` 정보를 분석해 실제 NIC 매칭 |
+| **Linux** | `ip route show`, `ip addr` 명령어 조합하여 IP/MASK/GW 추출 |
+
+---
+
+# 🖥️ macOS 탐지 방식
+
+macOS는 다음 명령어로 기본 라우팅 정보를 제공함:
+
+```
 route -n get default
 ```
 
-예시 출력:
-
+출력 예:
 ```
 interface: en0
 gateway: 192.168.0.1
+inet: 192.168.0.10
+netmask: 0xffffff00
 ```
 
-본 프로젝트는 이 중 `interface:` 값(en0 등)을 기반으로  
-현재 macOS가 실제로 사용 중인 네트워크 인터페이스를 식별하였습니다.
+여기서:
 
-### macOS 방식의 장점
-
-- 운영체제의 라우팅 테이블을 기반으로 직접 조회하기 때문에 정확도가 높습니다.
-- Wi-Fi(en0), 유선(en1) 등의 인터페이스를 추가적인 변환 없이 바로 사용할 수 있습니다.
-- 한글/지역 설정 등 문자 인코딩의 영향을 받지 않습니다.
+- **interface** → 기본 NIC (예: en0)
+- **gateway** → 공유기 IP
+- **inet** → 내 IP
+- **netmask(hex)** → 16진 마스크 → 10진 마스크로 변환 필요
 
 ---
 
-## 2. Windows에서의 인터페이스 감지 방식
+# 🪟 Windows 탐지 방식
 
-Windows는 macOS와 달리 기본 NIC 이름을 단순 문자열로 얻기 어렵습니다.
-
-### (1) NIC 별칭(Alias)이 한글일 수 있음
-
-예시:
-
+Windows는 macOS와 다르게 **인터페이스 Alias가 한글일 수 있음**  
+예:
 - 이더넷
 - Wi-Fi
 - 로컬 영역 연결
 
-하지만 pcap4j는 다음과 같은 **시스템 내부 장치명(Device Name)** 을 사용합니다.
+또한 PowerShell 기본 인코딩이 CP949여서 UTF-8 출력이 깨짐.  
+그러므로 Alias 기반 탐지 ❌  
+→ **실제 하드웨어 설명(InterfaceDescription)을 기준으로 매칭해야 함**
+
+사용 명령어:
 
 ```
-\Device\NPF_{AF4CDFBA-0345-47A5-B5F9-01B681E63D3E}
+Get-NetIPConfiguration
 ```
 
-Alias(이더넷 등)와 내부 장치명은 서로 연결되어 있지 않기 때문에  
-Alias 기반 감지는 사용할 수 없었습니다.
+이 명령에서:
+
+- InterfaceDescription
+- IPv4Address
+- IPv4DefaultGateway
+- PrefixLength(=CIDR)
+
+을 읽어 네트워크 정보를 완성.
+
+그 후 pcap4j의 NIC 목록과 **description을 비교하여 정확한 NIC 선택**.
 
 ---
 
-### (2) PowerShell 출력 인코딩 문제(CP949 → UTF-8)
+# 🐧 Linux 탐지 방식
 
-- PowerShell 기본 출력: CP949(ANSI)
-- Java 입력: UTF-8
+Linux는 다음 데이터를 조합해야 함:
 
-따라서 NIC Alias가 한글일 경우:
+### 1) 기본 라우트
 
 ```
-이더넷 → ????? 
+ip route show
 ```
 
-이와 같이 깨지는 문제가 발생하여 신뢰성이 떨어집니다.
+예:
+```
+default via 192.168.0.1 dev wlan0
+```
+
+여기서 NIC = `wlan0`, gateway = `192.168.0.1`
+
+### 2) IP + CIDR
+
+```
+ip -o -f inet addr show wlan0
+```
+
+예:
+```
+192.168.0.10/24
+```
+
+CIDR → subnet mask 변환  
+예: `/24 → 255.255.255.0`
 
 ---
 
-### (3) pcap4j는 InterfaceDescription 기반으로 NIC을 구분함
+# 📡 ARP 기반 IDS 로직
 
-예시:
-
-- Realtek PCIe GbE Family Controller
-- Intel(R) Wireless-AC 9560
-
-따라서 Windows에서는 Alias가 아니라  
-**InterfaceDescription을 기준으로 매칭하는 방식이 더 적합합니다.**
+### ✔ LAN 내부 ARP 트래픽만 분석
+IP/MASK 기반 네트워크 계산으로 WAN의 ARP는 모두 제외
 
 ---
 
-## Windows에서 사용한 최종 감지 방식
+# 🔍 탐지 구조
 
-Windows에서는 기본 게이트웨이가 존재하는 네트워크 인터페이스를 조회하여  
-그 인터페이스의 **InterfaceDescription** 을 가져오는 방식을 사용하였습니다.
-
-```powershell
-Get-NetIPConfiguration |
-    Where-Object {$_.IPv4DefaultGateway -ne $null} |
-    Select-Object -ExpandProperty InterfaceDescription
-```
-
-출력 예:
+## 1. **IP → MAC 테이블**
+동일한 IP에서 다른 MAC이 나오면:
 
 ```
-Realtek PCIe GbE Family Controller
+🚨 동일 IP에서 MAC 변경 감지!
+→ ARP 스푸핑 가능성
 ```
 
-이 값을 기반으로 pcap4j에서 제공하는 NIC 목록의  
-`description` 값과 매칭하여 실제 네트워크 인터페이스를 선택하였습니다.
+## 2. **MAC → IP 테이블**
+동일 MAC이 여러 IP로 나타나면:
+
+```
+⚠ 동일 MAC에서 여러 IP 사용 감지 → DHCP 스푸핑 가능성
+```
+
+## 3. **게이트웨이 스푸핑 탐지**
+게이트웨이와 동일한 IP를 쓰는 패킷이 들어오면:
+
+- 최초 MAC 저장
+- 다음번에 MAC이 다르면 공격으로 판단
+
+```
+🚨🚨 게이트웨이 ARP 스푸핑 감지!
+```
 
 ---
 
-## Windows 방식의 장점
+# 📡 게이트웨이 MAC 확인을 위한 ARP Request
 
-- 한글 Alias 문제를 완전히 제거하였습니다.
-- 인코딩(CP949/UTF-8) 문제의 영향을 받지 않습니다.
-- pcap4j와 동일한 기준(InterfaceDescription)을 사용하여 정확성이 높습니다.
-- 실제 기본 게이트웨이를 기반으로 하므로, 인터넷 통신에 사용되는 인터페이스만 선택됩니다.
+IDS는 필요 시 게이트웨이에게 ARP Request를 직접 보냄:
+
+- 브로드캐스트 MAC: `ff:ff:ff:ff:ff:ff`
+- 목적지 MAC: `00:00:00:00:00:00`
+- 목적지 IP: 게이트웨이 IP
+
+이를 통해 **정상 게이트웨이 MAC을 정확히 기록**하여 공격 감지.
 
 ---
 
-## 운영체제별 감지 방식 요약
+# ❌ 이 프로젝트는 Docker로 실행할 수 없음
 
-| 운영체제 | 감지 방식 | 특징 |
-|----------|-----------|--------|
-| macOS | `route -n get default` → interface 값 사용 | 라우팅 테이블 기반, 인코딩 영향 없음 |
-| Windows | 기본 게이트웨이 보유 NIC → InterfaceDescription 매칭 | 한글 Alias 문제 해결, pcap4j와 동일 기준 사용 |
+### 이유는 다음과 같음:
 
+1. 도커는 **가상의 NIC**만 제공
+2. 호스트 컴퓨터의 실제 NIC 패킷을 받을 수 없음
+3. ARP 트래픽은 로컬 브로드캐스트 기반이므로  
+   도커 내부에서는 **LAN 패킷을 절대 볼 수 없음**
+
+따라서 IDS는 **반드시 로컬 OS에서 직접 실행해야 함**
+
+---
+
+# ✔ 실행 방법
+
+### 1) 빌드 후 JAR 실행
+
+```
+java -jar simple-ids.jar
+```
+
+### 2) Windows EXE 패키징 가능
+요청 시 Inno Setup / Launch4j 버전도 제공 가능.
+
+---
+
+# 📦 프로젝트 구조
+
+```
+simple-ids/
+ ├── App.java                # 메인 IDS 실행부 (패킷 감지)
+ ├── network/
+ │    ├── NetworkDetector.java  # OS별 NIC/IP/MASK 탐지
+ │    ├── NetworkInfo.java      # 네트워크 정보 저장 DTO
+ │    ├── NetworkCalc.java      # 서브넷 계산 util
+ ├── README.md
+ └── build.gradle
+```
+
+---
+
+# ✨ 마무리
+
+이 프로젝트는 단순히 ARP를 출력하는 수준이 아니라,
+
+✔ OS별 NIC 탐지  
+✔ 실시간 패킷 캡처  
+✔ IP/MAC 일관성 검증  
+✔ 게이트웨이 스푸핑 감지  
+✔ ARP Request 전송
+
+
+---
