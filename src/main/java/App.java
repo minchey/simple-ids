@@ -6,33 +6,29 @@ import org.pcap4j.core.*;
 import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
-import java.net.InetAddress;
 
 import org.pcap4j.util.MacAddress;
-import org.pcap4j.packet.ArpPacket;
-import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.namednumber.ArpHardwareType;
 import org.pcap4j.packet.namednumber.ArpOperation;
 import org.pcap4j.packet.namednumber.EtherType;
 
-
+import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
 public class App {
 
-    // ARP 기록 저장하는 테이블 (IDS의 기억력)
-    private static Map<String, String> ipToMac = new HashMap<>(); //final은 참조변경이 되지 않아 초기화시 필요하므로 final x
+    // IDS가 기억하는 테이블
+    private static Map<String, String> ipToMac = new HashMap<>();
     private static Map<String, String> macToIp = new HashMap<>();
 
-    // 게이트웨이 MAC(처음 이후 계속 비교)
+    // 게이트웨이의 정상 MAC (1회 학습 후 고정)
     private static String gatewayMac = null;
 
-    public static void main(String[] args) throws PcapNativeException {
+    public static void main(String[] args) throws Exception {
 
-        //기본 네트워크 정보 가져오기
-        //운영체제별 NIC/IP/Mask/Gateway 자동 탐지
+        // 1) 네트워크 정보 자동 탐지
         NetworkInfo info = NetworkDetector.detect();
         if (info == null) {
             System.err.println("네트워크 정보를 가져오지 못했습니다.");
@@ -42,250 +38,184 @@ public class App {
         System.out.println("===== 자동 네트워크 정보 =====");
         System.out.println("인터페이스 = " + info.interfaceName);
         System.out.println("IP = " + info.ip);
-        System.out.println("게이트웨이 = " + info.gateway);
-        System.out.println("서브넷 마스크 = " + info.subnetMask);
-        System.out.println("==============================");
+        System.out.println("Gateway = " + info.gateway);
+        System.out.println("Mask = " + info.subnetMask);
+        System.out.println("================================");
 
-        // 2) pcap4j NIC 객체 가져오기
-        String winDesc = info.interfaceName;   // 예: "Realtek PCIe GbE Family Controller"
+        // 2) pcap4j NIC 찾기
+        PcapNetworkInterface nif = findNic(info.interfaceName);
+        if (nif == null) return;
 
-        PcapNetworkInterface nif = null;
-
-        // 2) 모든 NIC 목록 확인
-        for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
-            if (dev.getDescription() != null && dev.getDescription().contains(winDesc)) {
-                nif = dev;
-                break;
-            }
-        }
-
-        if (nif == null) {
-            System.err.println("Pcap4j에서 NIC을 찾지 못했습니다: " + winDesc);
-            return;
-        }
-
-        System.out.println("[PCAP4J 선택된 NIC]");
-        System.out.println("Name = " + nif.getName());
-        System.out.println("Description = " + nif.getDescription());
-
-        if (nif == null) {
-            System.err.println("Pcap4j에서 NIC을 찾지 못했습니다: " + info.interfaceName);
-            return;
-        }
-
-        // 3) 패킷 캡처 핸들 열기
+        // 3) 캡처 핸들 열기
         PcapHandle handle = nif.openLive(
                 65536,
                 PcapNetworkInterface.PromiscuousMode.PROMISCUOUS,
                 10
         );
 
-        System.out.println("[+] 실시간 ARP 기반 IDS 패킷 캡처 시작…");
+        // 4) 내 MAC 주소 알아오기
+        String myMac = getMyMacAddress(nif);
+        if (myMac == null) {
+            System.err.println("내 MAC을 찾지 못했습니다.");
+            return;
+        }
 
-        // 4) 메인 캡처 루프
+        System.out.println("내 MAC = " + myMac);
+
+        // 5) 게이트웨이 MAC 학습을 위한 ARP Request 1회 전송
+        sendArpRequest(handle, info.ip, myMac, info.gateway);
+
+        // 잠깐 대기하여 게이트웨이의 ARP Reply가 들어오도록 함
+        Thread.sleep(300);
+
+        System.out.println("\n[+] ARP 기반 IDS 감지 시작…\n");
+
+        // 6) 메인 캡처 루프
         while (true) {
             try {
-                Packet raw = handle.getNextPacketEx();
 
+                Packet raw = handle.getNextPacketEx();
                 EthernetPacket ether = raw.get(EthernetPacket.class);
                 if (ether == null) continue;
 
                 Packet inner = ether.getPayload();
                 if (inner == null) continue;
 
-                // ★ ARP 탐지
-                if (inner instanceof ArpPacket) {
-                    ArpPacket arp = inner.get(ArpPacket.class);
-                    ArpPacket.ArpHeader ah = arp.getHeader();
+                // ARP 패킷만 처리
+                if (!(inner instanceof ArpPacket)) continue;
 
-                    String srcIp = ah.getSrcProtocolAddr().getHostAddress();
-                    String dstIp = ah.getDstProtocolAddr().getHostAddress();
+                ArpPacket arp = inner.get(ArpPacket.class);
+                ArpPacket.ArpHeader ah = arp.getHeader();
 
+                String srcIp = ah.getSrcProtocolAddr().getHostAddress();
+                String dstIp = ah.getDstProtocolAddr().getHostAddress();
+                String senderMac = ah.getSrcHardwareAddr().toString();
 
-
-                    boolean srcInLan = NetworkCalc.isSameNetwork(info.ip, srcIp, info.subnetMask);
-                    boolean dstInLan = NetworkCalc.isSameNetwork(info.ip, dstIp, info.subnetMask);
-
-                    // LAN 범위 밖이라면 그냥 스킵
-                    if (!srcInLan && !dstInLan) {
-                        continue;
-                    }
-
-                    // ★ IDS에서 분석할 핵심 값 2개
-                    String senderIp = srcIp;
-                    String senderMac = ah.getSrcHardwareAddr().toString();
-
-                    String myMac = getMyMacAddress(nif);
-
-                    if (myMac == null) {
-                        System.err.println("MAC 주소를 얻지 못했습니다. 프로그램 종료!");
-                        return;
-                    }
-
-                    sendArpRequest(handle, info.ip, myMac, info.gateway);
-
-
-                    // 1) IP → MAC 기록
-                    if (!ipToMac.containsKey(senderIp)) {
-                        ipToMac.put(senderIp, senderMac);
-                    } else {
-                        String oldMac = ipToMac.get(senderIp);
-                        if (!oldMac.equals(senderMac)) {
-                            System.out.println("🚨 [경고] 동일 IP에서 MAC 변경 감지!");
-                            System.out.println("IP: " + senderIp);
-                            System.out.println("기존 MAC: " + oldMac);
-                            System.out.println("새 MAC: " + senderMac);
-                            ipToMac.put(senderIp, senderMac);
-
-                        }
-                    }
-
-                    // 2) MAC → IP 기록
-                    if (!macToIp.containsKey(senderMac)) {
-                        macToIp.put(senderMac, senderIp);
-                    } else {
-                        String oldIp = macToIp.get(senderMac);
-                        if (!oldIp.equals(senderIp)) {
-                            System.out.println("⚠️ [주의] 동일 MAC에서 IP 변경 감지");
-                            System.out.println("MAC: " + senderMac);
-                            System.out.println("기존 IP: " + oldIp);
-                            System.out.println("새 IP: " + senderIp);
-                            macToIp.put(senderMac, senderIp);
-                        }
-                    }
-
-                    // 3) 게이트웨이 스푸핑 탐지
-                    // 게이트웨이 자신이라고 주장하는 패킷만 검사
-                    if (srcIp.equals(info.gateway)) {
-                        String currentMac = senderMac;
-
-                        if (info.gatewayMac == null) {
-                            info.gatewayMac = currentMac;
-                            System.out.println("📌 게이트웨이 MAC 기록됨: " + currentMac);
-                        }
-                        else if (!info.gatewayMac.equals(currentMac)) {
-                            System.out.println("🚨🚨 [심각] 게이트웨이 ARP 스푸핑 감지!");
-                            System.out.println("정상 MAC: " + info.gatewayMac);
-                            System.out.println("스푸핑 MAC: " + currentMac);
-                        }
-                    }
-
-                    // LAN 내부 ARP 패킷
-                    System.out.println("========== ARP 탐지 (LAN 내) ==========");
-                    System.out.println("종류(Operation) → " + ah.getOperation());
-                    System.out.println("보낸 MAC(Source MAC) → "
-                            + senderMac);
-                    System.out.println("보낸 IP(Source IP) → " + senderIp);
-                    System.out.println("대상 IP(Target IP) → " + dstIp);
-                    System.out.println("대상 MAC(Target MAC) → " + ah.getDstHardwareAddr());
+                // ◆ 먼저 LAN 범위에 포함되는지 확인
+                if (!NetworkCalc.isSameNetwork(info.ip, srcIp, info.subnetMask) &&
+                        !NetworkCalc.isSameNetwork(info.ip, dstIp, info.subnetMask)) {
+                    continue;
                 }
 
+                // ===============================
+                // 1) 게이트웨이 MAC 학습 (초기 1회)
+                // ===============================
+                if (srcIp.equals(info.gateway) && gatewayMac == null) {
+                    gatewayMac = senderMac;
+                    System.out.println("📌 게이트웨이 MAC 학습됨 → " + gatewayMac);
+                }
+
+                // ===============================
+                // 2) 게이트웨이 스푸핑 탐지
+                // ===============================
+                if (srcIp.equals(info.gateway) && gatewayMac != null) {
+                    if (!gatewayMac.equals(senderMac)) {
+                        System.out.println("🚨🚨 [심각] 게이트웨이 ARP 스푸핑 감지!");
+                        System.out.println("정상 MAC: " + gatewayMac);
+                        System.out.println("공격 MAC: " + senderMac);
+                    }
+                }
+
+                // ===============================
+                // 3) ARP 테이블 기반 일반 스푸핑 탐지
+                // ===============================
+
+                // IP → MAC
+                if (ipToMac.containsKey(srcIp)) {
+                    String old = ipToMac.get(srcIp);
+                    if (!old.equals(senderMac)) {
+                        System.out.println("⚠️ [경고] 동일 IP에서 MAC 변경 감지!");
+                        System.out.println("IP = " + srcIp);
+                        System.out.println("기존 MAC = " + old);
+                        System.out.println("신규 MAC = " + senderMac);
+                    }
+                }
+                ipToMac.put(srcIp, senderMac);
+
+                // MAC → IP
+                if (macToIp.containsKey(senderMac)) {
+                    String oldIp = macToIp.get(senderMac);
+                    if (!oldIp.equals(srcIp)) {
+                        System.out.println("⚠️ [주의] 동일 MAC에서 IP 변경 감지!");
+                        System.out.println("MAC = " + senderMac);
+                        System.out.println("기존 IP = " + oldIp);
+                        System.out.println("신규 IP = " + srcIp);
+                    }
+                }
+                macToIp.put(senderMac, srcIp);
+
+                // ===============================
+                // 디버그용 출력
+                // ===============================
+                System.out.println("=== ARP 탐지 (LAN) ===");
+                System.out.println("Operation = " + ah.getOperation());
+                System.out.println("Sender IP = " + srcIp);
+                System.out.println("Sender MAC = " + senderMac);
+                System.out.println("Target IP = " + dstIp);
+                System.out.println("======================");
+
             } catch (TimeoutException e) {
-                // 패킷이 일정 시간 동안 없을 때 발생하는 예외 → 무시 가능
-            }
-            catch (Exception e){
-                e.printStackTrace();
+                // ignore
             }
         }
     }
-    // ===============================
-    // 📡 게이트웨이에 ARP 요청 보내기
-    // ===============================
-    // handle     : pcap4j 패킷 전송 핸들
-    // myIp       : 내 IPv4 주소 (예: 192.168.0.10)
-    // myMac      : 내 MAC 주소  (예: AA:BB:CC:DD:EE:FF)
-    // gatewayIp  : 게이트웨이 IP 주소 (예: 192.168.0.1)
-    // ===============================
-    private static void sendArpRequest(PcapHandle handle, String myIp, String myMac, String gatewayIp) throws Exception {
-        // ============================
-        // 1) MAC 주소 변환
-        // ============================
-        // 문자열 MAC → MacAddress 객체 변환
-        MacAddress srcMac = MacAddress.getByName(myMac);
 
-        // 브로드캐스트 MAC 주소 (ff:ff:ff:ff:ff:ff)
-        MacAddress broadcastMac = MacAddress.ETHER_BROADCAST_ADDRESS;
-
-        // ============================
-        // 2) IP 주소를 InetAddress로 변환
-        // ============================
-        InetAddress srcIp = InetAddress.getByName(myIp);
-        InetAddress dstIp = InetAddress.getByName(gatewayIp); // 게이트웨이에게 요청
-
-        // ============================
-        // 3) ARP 패킷 구성
-        // ============================
-        ArpPacket.Builder arpBuilder = new ArpPacket.Builder();
-        arpBuilder
-                // ARP는 이더넷 기반
-                .hardwareType(ArpHardwareType.ETHERNET)
-
-                // 프로토콜은 IPv4
-                .protocolType(EtherType.IPV4)
-
-                // MAC 길이 = 6, IP 길이 = 4
-                .hardwareAddrLength((byte) 6)
-                .protocolAddrLength((byte) 4)
-
-                // ARP 요청
-                .operation(ArpOperation.REQUEST)
-
-                // 요청자 정보 설정
-                .srcHardwareAddr(srcMac)
-                .srcProtocolAddr(srcIp)
-
-                // 대상 MAC은 "모른다(00:00:00:00:00:00)" 로 넣어야 함
-                .dstHardwareAddr(MacAddress.getByName("00:00:00:00:00:00"))
-                .dstProtocolAddr(dstIp);
-
-        // ============================
-        // 4) Ethernet Layer 구성
-        // ============================
-        EthernetPacket.Builder etherBuilder = new EthernetPacket.Builder();
-        etherBuilder
-                .dstAddr(broadcastMac)          // ARP Request는 브로드캐스트로 전송
-                .srcAddr(srcMac)                 // 나의 MAC
-                .type(EtherType.ARP)             // EtherType = 0x0806 (ARP)
-                .payloadBuilder(arpBuilder)      // 위에서 만든 ARP 패킷 삽입
-                .paddingAtBuild(true);
-
-        // ============================
-        // 5) 실제 패킷 전송
-        // ============================
-        Packet arpRequest = etherBuilder.build();
-        handle.sendPacket(arpRequest);
-
-        System.out.println("📡 ARP Request 전송 → 게이트웨이(" + gatewayIp + ")");
-    }
-
-    // ===============================
-    // 🔍 선택된 NIC의 MAC 주소 얻기
-    // ===============================
-    // pcap4j가 제공하는 getLinkLayerAddresses() 사용
-    // 윈도우/맥/리눅스 모두 MAC 주소를 정상적으로 리턴함
-    // ===============================
-    private static String getMyMacAddress(PcapNetworkInterface nif) {
-
-        // NIC의 링크 계층 주소들(MAC 포함)을 가져옴
-        for (org.pcap4j.util.LinkLayerAddress addr : nif.getLinkLayerAddresses()) {
-
-            // MAC 주소는 보통 6바이트 길이
-            if (addr instanceof org.pcap4j.util.MacAddress) {
-
-                MacAddress mac = (MacAddress) addr;
-
-                System.out.println("📌 내 NIC MAC 감지됨: " + mac.toString());
-
-                // 문자열로 반환 (예: "AA:BB:CC:DD:EE:FF")
-                return mac.toString();
+    // ---------------------------------------------------
+    // 선택된 NIC 찾기
+    // ---------------------------------------------------
+    private static PcapNetworkInterface findNic(String desc) throws PcapNativeException {
+        for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
+            if (dev.getDescription() != null && dev.getDescription().contains(desc)) {
+                System.out.println("[NIC 선택됨] " + dev.getName());
+                return dev;
             }
         }
-
-        // MAC을 찾지 못한 경우
-        System.err.println("⚠ MAC 주소를 찾지 못했습니다.");
+        System.err.println("NIC을 찾지 못했습니다: " + desc);
         return null;
     }
 
+    // ---------------------------------------------------
+    // NIC MAC 주소 가져오기
+    // ---------------------------------------------------
+    private static String getMyMacAddress(PcapNetworkInterface nif) {
+        for (org.pcap4j.util.LinkLayerAddress addr : nif.getLinkLayerAddresses()) {
+            if (addr instanceof MacAddress) {
+                return addr.toString();
+            }
+        }
+        return null;
+    }
 
+    // ---------------------------------------------------
+    // ARP Request 전송 (1회)
+    // ---------------------------------------------------
+    private static void sendArpRequest(PcapHandle handle, String myIp, String myMac, String gatewayIp) throws Exception {
 
+        MacAddress srcMac = MacAddress.getByName(myMac);
+        MacAddress broadcast = MacAddress.ETHER_BROADCAST_ADDRESS;
+
+        InetAddress srcIp = InetAddress.getByName(myIp);
+        InetAddress dstIp = InetAddress.getByName(gatewayIp);
+
+        ArpPacket.Builder arp = new ArpPacket.Builder();
+        arp.hardwareType(ArpHardwareType.ETHERNET)
+                .protocolType(EtherType.IPV4)
+                .hardwareAddrLength((byte) 6)
+                .protocolAddrLength((byte) 4)
+                .operation(ArpOperation.REQUEST)
+                .srcHardwareAddr(srcMac)
+                .srcProtocolAddr(srcIp)
+                .dstHardwareAddr(MacAddress.getByName("00:00:00:00:00:00"))
+                .dstProtocolAddr(dstIp);
+
+        EthernetPacket.Builder ether = new EthernetPacket.Builder();
+        ether.dstAddr(broadcast)
+                .srcAddr(srcMac)
+                .type(EtherType.ARP)
+                .payloadBuilder(arp)
+                .paddingAtBuild(true);
+
+        handle.sendPacket(ether.build());
+        System.out.println("📡 게이트웨이에 ARP Request 전송 완료");
+    }
 }
