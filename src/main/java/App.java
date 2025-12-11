@@ -6,6 +6,15 @@ import org.pcap4j.core.*;
 import org.pcap4j.packet.ArpPacket;
 import org.pcap4j.packet.EthernetPacket;
 import org.pcap4j.packet.Packet;
+import java.net.InetAddress;
+
+import org.pcap4j.util.MacAddress;
+import org.pcap4j.packet.ArpPacket;
+import org.pcap4j.packet.EthernetPacket;
+import org.pcap4j.packet.namednumber.ArpHardwareType;
+import org.pcap4j.packet.namednumber.ArpOperation;
+import org.pcap4j.packet.namednumber.EtherType;
+
 
 import java.util.HashMap;
 import java.util.Map;
@@ -106,6 +115,16 @@ public class App {
                     String senderIp = srcIp;
                     String senderMac = ah.getSrcHardwareAddr().toString();
 
+                    String myMac = getMyMacAddress(nif);
+
+                    if (myMac == null) {
+                        System.err.println("MAC 주소를 얻지 못했습니다. 프로그램 종료!");
+                        return;
+                    }
+
+                    sendArpRequest(handle, info.ip, myMac, info.gateway);
+
+
                     // 1) IP → MAC 기록
                     if (!ipToMac.containsKey(senderIp)) {
                         ipToMac.put(senderIp, senderMac);
@@ -175,4 +194,104 @@ public class App {
             }
         }
     }
+    // ===============================
+    // 📡 게이트웨이에 ARP 요청 보내기
+    // ===============================
+    // handle     : pcap4j 패킷 전송 핸들
+    // myIp       : 내 IPv4 주소 (예: 192.168.0.10)
+    // myMac      : 내 MAC 주소  (예: AA:BB:CC:DD:EE:FF)
+    // gatewayIp  : 게이트웨이 IP 주소 (예: 192.168.0.1)
+    // ===============================
+    private static void sendArpRequest(PcapHandle handle, String myIp, String myMac, String gatewayIp) throws Exception {
+        // ============================
+        // 1) MAC 주소 변환
+        // ============================
+        // 문자열 MAC → MacAddress 객체 변환
+        MacAddress srcMac = MacAddress.getByName(myMac);
+
+        // 브로드캐스트 MAC 주소 (ff:ff:ff:ff:ff:ff)
+        MacAddress broadcastMac = MacAddress.ETHER_BROADCAST_ADDRESS;
+
+        // ============================
+        // 2) IP 주소를 InetAddress로 변환
+        // ============================
+        InetAddress srcIp = InetAddress.getByName(myIp);
+        InetAddress dstIp = InetAddress.getByName(gatewayIp); // 게이트웨이에게 요청
+
+        // ============================
+        // 3) ARP 패킷 구성
+        // ============================
+        ArpPacket.Builder arpBuilder = new ArpPacket.Builder();
+        arpBuilder
+                // ARP는 이더넷 기반
+                .hardwareType(ArpHardwareType.ETHERNET)
+
+                // 프로토콜은 IPv4
+                .protocolType(EtherType.IPV4)
+
+                // MAC 길이 = 6, IP 길이 = 4
+                .hardwareAddrLength((byte) 6)
+                .protocolAddrLength((byte) 4)
+
+                // ARP 요청
+                .operation(ArpOperation.REQUEST)
+
+                // 요청자 정보 설정
+                .srcHardwareAddr(srcMac)
+                .srcProtocolAddr(srcIp)
+
+                // 대상 MAC은 "모른다(00:00:00:00:00:00)" 로 넣어야 함
+                .dstHardwareAddr(MacAddress.getByName("00:00:00:00:00:00"))
+                .dstProtocolAddr(dstIp);
+
+        // ============================
+        // 4) Ethernet Layer 구성
+        // ============================
+        EthernetPacket.Builder etherBuilder = new EthernetPacket.Builder();
+        etherBuilder
+                .dstAddr(broadcastMac)          // ARP Request는 브로드캐스트로 전송
+                .srcAddr(srcMac)                 // 나의 MAC
+                .type(EtherType.ARP)             // EtherType = 0x0806 (ARP)
+                .payloadBuilder(arpBuilder)      // 위에서 만든 ARP 패킷 삽입
+                .paddingAtBuild(true);
+
+        // ============================
+        // 5) 실제 패킷 전송
+        // ============================
+        Packet arpRequest = etherBuilder.build();
+        handle.sendPacket(arpRequest);
+
+        System.out.println("📡 ARP Request 전송 → 게이트웨이(" + gatewayIp + ")");
+    }
+
+    // ===============================
+    // 🔍 선택된 NIC의 MAC 주소 얻기
+    // ===============================
+    // pcap4j가 제공하는 getLinkLayerAddresses() 사용
+    // 윈도우/맥/리눅스 모두 MAC 주소를 정상적으로 리턴함
+    // ===============================
+    private static String getMyMacAddress(PcapNetworkInterface nif) {
+
+        // NIC의 링크 계층 주소들(MAC 포함)을 가져옴
+        for (org.pcap4j.util.LinkLayerAddress addr : nif.getLinkLayerAddresses()) {
+
+            // MAC 주소는 보통 6바이트 길이
+            if (addr instanceof org.pcap4j.util.MacAddress) {
+
+                MacAddress mac = (MacAddress) addr;
+
+                System.out.println("📌 내 NIC MAC 감지됨: " + mac.toString());
+
+                // 문자열로 반환 (예: "AA:BB:CC:DD:EE:FF")
+                return mac.toString();
+            }
+        }
+
+        // MAC을 찾지 못한 경우
+        System.err.println("⚠ MAC 주소를 찾지 못했습니다.");
+        return null;
+    }
+
+
+
 }
