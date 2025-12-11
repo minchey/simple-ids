@@ -22,3 +22,22 @@ dependencies {
 test {
     useJUnitPlatform()
 }
+
+tasks.register('fatJar', Jar) {
+    archiveBaseName = 'simple-ids'
+    archiveVersion = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes(
+                'Main-Class': 'App'
+        )
+    }
+
+    from(sourceSets.main.output)
+
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
