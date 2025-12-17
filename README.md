@@ -1,111 +1,138 @@
-# Simple IDS — ARP Spoofing Detection Tool
+# 🛡 Simple IDS (ARP Spoofing Detection System)
 
-### 🔒 Lightweight ARP-based Intrusion Detection System
-Windows 환경에서 실시간 ARP 스푸핑 공격을 탐지하는 IDS 도구입니다.  
-jlink로 경량 JRE를 포함하고 있어 **Java 미설치 환경에서도 바로 실행할 수 있습니다.**
+Java + Pcap4J 기반의 **LAN 내부 ARP 스푸핑 탐지 IDS**입니다.  
+Gateway MAC 위조 탐지, IP–MAC 매핑 분석, LAN 범위 필터링 등을 지원합니다.
 
----
-
-## 🚀 실행 방법
-
-### 1) Npcap 설치 (필수)
-패킷 캡처를 위해 **Npcap**이 필요합니다.  
-https://npcap.com
-
-설치 옵션
-- ✔ WinPcap API-Compatible Mode 체크
+Windows + macOS 모두 실행 가능한 독립 실행 패키지를 제공합니다.
 
 ---
 
-### 2) 프로젝트 다운로드 후 압축 해제
-GitHub Releases의 `simple-ids.zip` 다운로드 → 압축 해제
+# 📌 기능 소개
+
+### ✔ 실시간 ARP 패킷 캡처
+프라미스큐어스 모드로 네트워크의 ARP 패킷을 실시간 수신합니다.
+
+### ✔ 게이트웨이 ARP 스푸핑 탐지
+게이트웨이 IP가 인증되지 않은 MAC 주소를 사용하면 즉시 경고합니다.
+
+### ✔ IP → MAC / MAC → IP 테이블 기반 스푸핑 감지
+동일 IP가 서로 다른 MAC으로 변경되면 경고합니다.  
+동일 MAC이 서로 다른 IP로 변경되어도 경고합니다.
+
+### ✔ LAN 범위 필터링
+서브넷 마스크 기반으로 **내 LAN 내부의 패킷만** 분석합니다.
 
 ---
 
-### 3) 실행
-압축을 해제한 폴더에서:
-
-run.bat
-
-더블 클릭하면 실행됩니다.
-
-Java 설치 필요 없음 (`runtime/` 폴더에 포함).
-
----
-
-## 📡 기능 개요
-
-### ✔ 1) ARP 패킷 실시간 캡처
-LAN 내부에서 발생하는 모든 ARP 요청/응답 패킷을 모니터링합니다.
-
-### ✔ 2) IP → MAC 매핑 테이블 유지
-정상적인 ARP 테이블을 지속적으로 학습하여 관리합니다.
-
-### ✔ 3) MAC 변조 감지  
-동일 IP에서 MAC 주소가 바뀐 경우
-→ ARP Spoofing 가능성 경고
-
-### ✔ 4) Gateway Spoofing 탐지
-게이트웨이가 아닌 장비가 “나는 게이트웨이다”라고 주장할 경우 자동 감지합니다.
-
----
-
-## 🧪 로그 출력 예시
-
-📡 게이트웨이에 ARP Request 전송 완료
-[+] ARP 기반 IDS 감지 시작...
-
-========== ARP 탐지 (LAN 내) ==========\
-종류(Operation) → REQUEST\
-보낸 IP → 192.168.0.15\
-보낸 MAC → 70:30:5d:83:5f:31\
-대상 IP → 192.168.0.1\
-대상 MAC → 00:00:00:00:00:00
-
-🚨 [경고] 동일 IP에서 MAC 변경 감지!\
-IP: 192.168.0.15\
-기존 MAC: 70:30:5d:83:5f:31\
-새 MAC: 11:22:33:44:55:66
-
-🚨🚨 [심각] 게이트웨이 ARP 스푸핑 감지!\
-정상 MAC: 40:44:cc:5a:c6:c7\
-스푸핑 MAC: 11:22:33:44:55:66
-
-
----
-
-## 📁 패키지 구조
+# 📦 실행 파일 구성
 
 simple-ids/\
-├── build/libs/simple-ids.jar # IDS 프로그램 JAR\
-├── runtime/ # jlink로 생성한 최소 JRE (Java 설치 불필요)\
-├── run.bat # 실행 스크립트\
-├── README.md # 설명서\
-├── src/ # Java 소스 코드
+├── simple-ids.jar\
+├── runtime-win/ (Windows 실행용 JRE)\
+├── runtime-mac/ (macOS 실행용 JRE)\
+├── run.bat (Windows 실행 스크립트)\
+├── run.sh (macOS 실행 스크립트)\
+└── README.md
 
 
 ---
 
-## 🛠 기술 스택
+# 🪟 Windows 실행 방법
 
-- Java 17
-- Pcap4j
-- jlink (커스텀 런타임 이미지 생성)
-- Windows / Npcap 환경 최적화
+### ✔ 1) Npcap 설치 필수
+ARP 패킷 캡처를 위해 반드시 Npcap 설치 필요  
+https://npcap.com/
 
----
-
-## 📌 개발 목적
-ARP 스푸핑은 LAN 환경에서 가장 흔하고 위험한 공격 중 하나입니다.  
-이 IDS는 다음을 목표로 개발되었습니다:
-
-- 로컬 네트워크에서 스푸핑 탐지 자동화
-- 실시간 경고 시스템 구축
-- 최소 환경에서 실행 가능한 보안 도구 제작
+설치 옵션:
+- ✔ "Install Npcap in WinPcap API-compatible Mode" 체크
 
 ---
 
-## 📬 문의 / 개발자
-Developed by **Minchey**  
-GitHub: https://github.com/minchey
+### ✔ 2) IDS 실행
 
+압축 해제 →  
+run.bat\
+더블클릭 또는 CMD에서 실행.
+
+---
+
+# 🍎 macOS 실행 방법
+
+macOS는 BPF 장치 접근 때문에 **root 권한 필요**.
+
+### ✔ 1) 실행 권한 부여
+
+chmod +x run.sh
+
+### ✔ 2) root 권한으로 실행
+
+sudo ./run.sh
+
+
+---
+
+# ⚠️ macOS 경고 관련
+
+다음 경고는 정상이며 무시해도 됨:
+
+WARNING: Restricted methods will be blocked...
+Use --enable-native-access=ALL-UNNAMED
+
+---
+
+# 📊 실행 예시
+
+### 게이트웨이 정상 응답
+
+📡 게이트웨이에 ARP Request 전송 완료\
+📌 게이트웨이 MAC 학습됨 → 88:3c:1c:71:25
+
+
+### LAN 패킷 출력
+
+=== ARP 탐지 (LAN) ===\
+Sender IP = 172.30.1.254\
+Sender MAC = 88:3c:1c:1c:71:25\
+Target IP = 172.30.1.65
+
+
+### 스푸핑 감지
+
+🚨🚨 [심각] 게이트웨이 ARP 스푸핑 감지!\
+정상 MAC: 88:3c:1c:1c:71:25\
+공격 MAC: 66:77:88:99:AA:BB
+
+
+---
+
+# 🛠 개발자 정보 (빌드)
+
+### fatJar 생성
+./gradlew fatJar
+
+### Windows용 JRE 생성
+jlink --no-header-files --no-man-pages --strip-debug
+--compress=2
+--add-modules java.base,java.logging,java.net.http,java.xml,java.sql
+--output runtime-win
+
+
+### macOS용 JRE 생성
+jlink --no-header-files --no-man-pages --strip-debug
+--compress=2
+--add-modules java.base,java.logging,java.net.http,java.xml,java.sql
+--output runtime-mac
+
+
+---
+
+# 📩 Contact
+
+Developer: **minchey**  
+GitHub: https://github.com/minchey  
+Security-focused Java developer.
+
+---
+
+# 📝 License
+MIT License
