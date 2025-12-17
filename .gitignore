@@ -41,10 +41,8 @@ bin/
 ### Mac OS ###
 .DS_Store
 
+
+# Ignore runtime JRE folders
 runtime/
-*.zip
-*.bat
-*.sh
-*.dll
-*.dylib
-*.exe
+runtime-mac/
+runtime-win/
