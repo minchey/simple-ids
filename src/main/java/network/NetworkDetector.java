@@ -22,28 +22,26 @@ public class NetworkDetector {
         NetworkInfo info = new NetworkInfo();
 
         try {
-            // 1) 기본 라우팅 테이블 가져오기
+            // 1) 기본 라우팅 테이블 읽기
             Process proc = Runtime.getRuntime().exec("route -n get default");
             BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
 
             String line;
             while ((line = reader.readLine()) != null) {
 
-                // 인터페이스 명
                 if (line.trim().startsWith("interface:")) {
                     info.interfaceName = line.split(":")[1].trim();
                 }
 
-                // 기본 게이트웨이
                 if (line.trim().startsWith("gateway:")) {
                     info.gateway = line.split(":")[1].trim();
                 }
             }
 
-            // 인터페이스 없으면 실패
-            if (info.interfaceName == null) return null;
+            // 인터페이스 못 찾으면 실패
+            if (info.interfaceName == null) return info;
 
-            // 2) 해당 인터페이스의 상세 정보 가져오기
+            // 2) 해당 인터페이스 정보를 ifconfig에서 가져옴
             Process ifconfigProc = Runtime.getRuntime().exec("ifconfig " + info.interfaceName);
             BufferedReader ifReader = new BufferedReader(new InputStreamReader(ifconfigProc.getInputStream()));
 
@@ -51,21 +49,19 @@ public class NetworkDetector {
 
                 line = line.trim();
 
-                // IP 찾기
+                // IP
                 if (line.startsWith("inet ")) {
-                    // 예: inet 172.30.1.65 netmask 0xffffff00 broadcast ...
-                    String[] parts = line.split(" ");
-                    info.ip = parts[1].trim();
+                    String[] parts = line.split("\\s+");
+                    info.ip = parts[1]; // inet 뒤의 값
                 }
 
-                // netmask 찾기
+                // netmask
                 if (line.contains("netmask")) {
-                    // "netmask 0xffffff00" 형식
-                    String[] parts = line.split(" ");
+                    // 예: netmask 0xffffff00
+                    String[] parts = line.split("\\s+");
                     for (int i = 0; i < parts.length; i++) {
                         if (parts[i].equals("netmask")) {
-                            info.subnetMask = convertHexMaskToDecimal(parts[i + 1].trim());
-                            break;
+                            info.subnetMask = convertHexMaskToDecimal(parts[i + 1]);
                         }
                     }
                 }
@@ -75,9 +71,10 @@ public class NetworkDetector {
 
         } catch (Exception e) {
             e.printStackTrace();
-            return null;
+            return info;
         }
     }
+
 
     private static String convertHexMaskToDecimal(String hexMask) {
         long mask = Long.decode(hexMask);
