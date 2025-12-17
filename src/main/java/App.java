@@ -139,7 +139,8 @@ public class App {
         // ----------------------
         if (os.contains("mac")) {
             for (PcapNetworkInterface dev : Pcaps.findAllDevs()) {
-                if (dev.getName().equals(interfaceName)) {
+                String devName = dev.getName();
+                if (devName != null && devName.equals(interfaceName)) {
                     System.out.println("[macOS NIC 선택됨] " + dev.getName());
                     return dev;
                 }
@@ -147,6 +148,7 @@ public class App {
             System.err.println("macOS에서 NIC을 찾지 못했습니다: " + interfaceName);
             return null;
         }
+
 
         // ----------------------
         // ✔ Windows / Linux (기존 방식)

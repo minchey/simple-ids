@@ -22,7 +22,6 @@ public class NetworkDetector {
         NetworkInfo info = new NetworkInfo();
 
         try {
-            // 1) 기본 라우팅 테이블 읽기
             Process proc = Runtime.getRuntime().exec("route -n get default");
             BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
 
@@ -36,33 +35,20 @@ public class NetworkDetector {
                 if (line.trim().startsWith("gateway:")) {
                     info.gateway = line.split(":")[1].trim();
                 }
-            }
 
-            // 인터페이스 못 찾으면 실패
-            if (info.interfaceName == null) return info;
-
-            // 2) 해당 인터페이스 정보를 ifconfig에서 가져옴
-            Process ifconfigProc = Runtime.getRuntime().exec("ifconfig " + info.interfaceName);
-            BufferedReader ifReader = new BufferedReader(new InputStreamReader(ifconfigProc.getInputStream()));
-
-            while ((line = ifReader.readLine()) != null) {
-
-                line = line.trim();
-
-                // IP
-                if (line.startsWith("inet ")) {
-                    String[] parts = line.split("\\s+");
-                    info.ip = parts[1]; // inet 뒤의 값
+                // 내 IP (예: inet 172.30.1.65)
+                if (line.trim().startsWith("inet ")) {
+                    String[] sp = line.trim().split(" ");
+                    if (sp.length >= 2) {
+                        info.ip = sp[1].trim();
+                    }
                 }
 
-                // netmask
-                if (line.contains("netmask")) {
-                    // 예: netmask 0xffffff00
-                    String[] parts = line.split("\\s+");
-                    for (int i = 0; i < parts.length; i++) {
-                        if (parts[i].equals("netmask")) {
-                            info.subnetMask = convertHexMaskToDecimal(parts[i + 1]);
-                        }
+                // netmask (예: netmask 0xffffff00)
+                if (line.trim().startsWith("netmask ")) {
+                    String[] sp = line.trim().split(" ");
+                    if (sp.length >= 2) {
+                        info.subnetMask = convertHexMaskToDecimal(sp[1].trim());
                     }
                 }
             }
@@ -71,9 +57,11 @@ public class NetworkDetector {
 
         } catch (Exception e) {
             e.printStackTrace();
-            return info;
         }
+
+        return null;
     }
+
 
 
     private static String convertHexMaskToDecimal(String hexMask) {
