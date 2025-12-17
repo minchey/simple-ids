@@ -18,45 +18,67 @@ public class NetworkDetector {
         return null;
     }
 
-    private static NetworkInfo detectMac(){
+    private static NetworkInfo detectMac() {
         NetworkInfo info = new NetworkInfo();
 
         try {
-            // macOS 기본 라우팅 테이블 읽기
+            // 1) 기본 라우팅 테이블 가져오기
             Process proc = Runtime.getRuntime().exec("route -n get default");
             BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
 
             String line;
-            while ((line = reader.readLine()) != null){
+            while ((line = reader.readLine()) != null) {
 
-                //인터페이스 명 찾기
-                if(line.trim().startsWith("interface:")){
+                // 인터페이스 명
+                if (line.trim().startsWith("interface:")) {
                     info.interfaceName = line.split(":")[1].trim();
                 }
 
-                //기본 게이트웨이 찾기
-                if(line.trim().startsWith("gateway:")){
+                // 기본 게이트웨이
+                if (line.trim().startsWith("gateway:")) {
                     info.gateway = line.split(":")[1].trim();
                 }
+            }
 
-                //내 ip주소 찾기
-                if(line.trim().startsWith("inet:")){
-                    info.ip = line.split(":")[1].trim();
+            // 인터페이스 없으면 실패
+            if (info.interfaceName == null) return null;
+
+            // 2) 해당 인터페이스의 상세 정보 가져오기
+            Process ifconfigProc = Runtime.getRuntime().exec("ifconfig " + info.interfaceName);
+            BufferedReader ifReader = new BufferedReader(new InputStreamReader(ifconfigProc.getInputStream()));
+
+            while ((line = ifReader.readLine()) != null) {
+
+                line = line.trim();
+
+                // IP 찾기
+                if (line.startsWith("inet ")) {
+                    // 예: inet 172.30.1.65 netmask 0xffffff00 broadcast ...
+                    String[] parts = line.split(" ");
+                    info.ip = parts[1].trim();
                 }
 
-                // 서브넷 마스크 찾기
-                if (line.trim().startsWith("netmask:")) {
-                    String hexMask = line.split(":")[1].trim();
-                    info.subnetMask = convertHexMaskToDecimal(hexMask);
+                // netmask 찾기
+                if (line.contains("netmask")) {
+                    // "netmask 0xffffff00" 형식
+                    String[] parts = line.split(" ");
+                    for (int i = 0; i < parts.length; i++) {
+                        if (parts[i].equals("netmask")) {
+                            info.subnetMask = convertHexMaskToDecimal(parts[i + 1].trim());
+                            break;
+                        }
+                    }
                 }
             }
 
             return info;
+
         } catch (Exception e) {
             e.printStackTrace();
+            return null;
         }
-        return null;
     }
+
     private static String convertHexMaskToDecimal(String hexMask) {
         long mask = Long.decode(hexMask);
         return String.format("%d.%d.%d.%d",

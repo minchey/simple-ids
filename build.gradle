@@ -27,16 +27,13 @@ test {
 
 tasks.register('fatJar', Jar) {
     archiveBaseName = 'simple-ids'
-    archiveVersion = ''
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     manifest {
-        attributes(
-                'Main-Class': 'App'
-        )
+        attributes 'Main-Class': 'App'
     }
 
-    from(sourceSets.main.output)
+    from sourceSets.main.output
 
     dependsOn configurations.runtimeClasspath
     from {
