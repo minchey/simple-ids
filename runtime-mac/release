@@ -1,2 +1,2 @@
-JAVA_VERSION="24.0.2"
-MODULES="java.base java.logging java.net.http java.xml"
+JAVA_VERSION="21.0.8"
+MODULES="java.base java.logging java.net.http java.transaction.xa java.xml java.sql"

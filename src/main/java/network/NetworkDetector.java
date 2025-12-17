@@ -22,33 +22,54 @@ public class NetworkDetector {
         NetworkInfo info = new NetworkInfo();
 
         try {
+            // 1) 라우팅 테이블에서 인터페이스와 게이트웨이 읽기
             Process proc = Runtime.getRuntime().exec("route -n get default");
             BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
 
             String line;
             while ((line = reader.readLine()) != null) {
+                line = line.trim();
 
-                if (line.trim().startsWith("interface:")) {
+                if (line.startsWith("interface:")) {
                     info.interfaceName = line.split(":")[1].trim();
                 }
 
-                if (line.trim().startsWith("gateway:")) {
+                if (line.startsWith("gateway:")) {
                     info.gateway = line.split(":")[1].trim();
                 }
+            }
 
-                // 내 IP (예: inet 172.30.1.65)
-                if (line.trim().startsWith("inet ")) {
-                    String[] sp = line.trim().split(" ");
-                    if (sp.length >= 2) {
-                        info.ip = sp[1].trim();
-                    }
-                }
+            // 인터페이스 없으면 실패
+            if (info.interfaceName == null) return info;
 
-                // netmask (예: netmask 0xffffff00)
-                if (line.trim().startsWith("netmask ")) {
-                    String[] sp = line.trim().split(" ");
-                    if (sp.length >= 2) {
-                        info.subnetMask = convertHexMaskToDecimal(sp[1].trim());
+            // 2) 인터페이스 기반으로 내 IP 주소 가져오기
+            Process ipProc = Runtime.getRuntime().exec("ipconfig getifaddr " + info.interfaceName);
+            BufferedReader ipReader = new BufferedReader(new InputStreamReader(ipProc.getInputStream()));
+            info.ip = ipReader.readLine();  // 한 줄이면 됨
+
+            // 3) ifconfig 기반으로 netmask 파싱
+            Process maskProc = Runtime.getRuntime().exec("ifconfig " + info.interfaceName);
+            BufferedReader maskReader = new BufferedReader(new InputStreamReader(maskProc.getInputStream()));
+
+            while ((line = maskReader.readLine()) != null) {
+                line = line.trim();
+
+                // 예: "inet 172.30.1.xx netmask 0xffffff00 broadcast 172.30.1.xxx"
+                if (line.startsWith("inet ") && line.contains("netmask")) {
+
+                    String[] parts = line.split("\\s+");
+                    // parts 예시: ["inet","172.30.1.xx","netmask","0xffffff00","broadcast","172.30.1.xx"]
+
+                    for (int i = 0; i < parts.length; i++) {
+                        if (parts[i].equals("netmask") && i + 1 < parts.length) {
+                            String hexMask = parts[i + 1].trim();
+
+                            // broadcast, unknown 등 들어올 때 처리
+                            if (hexMask.equalsIgnoreCase("broadcast")) continue;
+                            if (!hexMask.startsWith("0x")) continue;
+
+                            info.subnetMask = convertHexMaskToDecimal(hexMask);
+                        }
                     }
                 }
             }
@@ -61,6 +82,8 @@ public class NetworkDetector {
 
         return null;
     }
+
+
 
 
 
